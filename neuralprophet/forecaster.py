@@ -765,6 +765,7 @@ class NeuralProphet:
         checkpointing: bool = False,
         continue_training: bool = False,
         num_workers: int = 0,
+        ids_weights=None,
     ):
         """Train, and potentially evaluate model.
 
@@ -832,6 +833,9 @@ class NeuralProphet:
 
         if metrics is not None:
             self.metrics = utils_metrics.get_metrics(metrics)
+
+        if ids_weights is not None:
+            self.config_train.ids_weights = ids_weights
 
         # Warnings
         if early_stopping:

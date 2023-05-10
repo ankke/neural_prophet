@@ -725,12 +725,14 @@ class TimeNet(pl.LightningModule):
     def set_compute_components(self, compute_components_flag):
         self.compute_components_flag = compute_components_flag
 
-    def loss_func(self, inputs, predicted, targets):
+    def loss_func(self, inputs, predicted, targets, meta):
         loss = None
         # Compute loss. no reduction.
         loss = self.config_train.loss_func(predicted, targets)
         # Weigh newer samples more.
         loss = loss * self._get_time_based_sample_weight(t=inputs["time"])
+        # Apply weights per time series in panel data.
+        loss = loss * self._get_ID_based_sample_weight(t=inputs["time"], ids=meta["df_name"])
         loss = loss.sum(dim=2).mean()
         # Regularize.
         if self.reg_enabled:
@@ -753,7 +755,7 @@ class TimeNet(pl.LightningModule):
         # Store predictions in self for later network visualization
         self.train_epoch_prediction = predicted
         # Calculate loss
-        loss, reg_loss = self.loss_func(inputs, predicted, targets)
+        loss, reg_loss = self.loss_func(inputs, predicted, targets, meta)
 
         # Optimization
         optimizer = self.optimizers()
@@ -786,7 +788,7 @@ class TimeNet(pl.LightningModule):
         # Run forward calculation
         predicted = self.forward(inputs, meta_name_tensor)
         # Calculate loss
-        loss, reg_loss = self.loss_func(inputs, predicted, targets)
+        loss, reg_loss = self.loss_func(inputs, predicted, targets, meta)
         # Metrics
         if self.metrics_enabled:
             predicted_denorm = self.denormalize(predicted[:, :, 0])
@@ -805,7 +807,7 @@ class TimeNet(pl.LightningModule):
         # Run forward calculation
         predicted = self.forward(inputs, meta_name_tensor)
         # Calculate loss
-        loss, reg_loss = self.loss_func(inputs, predicted, targets)
+        loss, reg_loss = self.loss_func(inputs, predicted, targets, meta)
         # Metrics
         if self.metrics_enabled:
             self.log("Loss_test", loss, **self.log_args)
@@ -857,6 +859,13 @@ class TimeNet(pl.LightningModule):
             # with end weight being 1.0
             weight = (1.0 + time * (end_w - 1.0)) / end_w
         return weight.unsqueeze(dim=2)  # add an extra dimension for the quantiles
+
+    def _get_ID_based_sample_weight(self, t, ids):
+        weight = np.vectorize(self.config_train.ids_weights.get, otypes=[np.float64])(ids)
+        weight[np.isnan(weight)] = 1
+        weight = torch.from_numpy(weight).float()
+        weight = weight.unsqueeze(dim=1).expand_as(t)
+        return weight.unsqueeze(dim=2)
 
     def _add_batch_regularizations(self, loss, epoch, progress):
         """Add regularization terms to loss, if applicable
